@@ -1,0 +1,8 @@
+.tmp*
+.project
+.settings
+temp/*
+output/*
+*.user
+*.ncb
+*.suo
