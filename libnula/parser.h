@@ -499,10 +499,14 @@ struct MethodDeclarator {
 
 #define YYSTYPE_IS_DECLARED
 union YYSTYPE {
-	List<Declarator> decls;
-	MethodDeclarator declarator;
+	int modifier;
+	i::Type *type;
+	List<Declarator> *decls;
+	Declarator decl;
+	MethodDeclarator meth_decl;
 	Expression *expression;
 	Statement *statement;
+	List<string *> *strings;
 	List<Expression *> *arguments_list;
 };
 

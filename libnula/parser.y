@@ -4,6 +4,13 @@
 #include "parser.h"
 
 
+#define INT_TYPE		Int::class$
+#define FLOAT_TYPE		Float::class$
+#define BOOLEAN_TYPE	Bool::class$
+#define OBJECT_TYPE		Object::class$
+#define STRING_TYPE		String::class$
+
+
 namespace nula {
 
 %}
@@ -11,6 +18,13 @@ namespace nula {
 %union {
 	int modifier;
 	i::Type *type;
+	List<Declarator> *decls;
+	Declarator decl;
+	MethodDeclarator meth_decl;
+	Expression *expression;
+	Statement *statement;
+	List<string *> *strings;
+	List<Expression *> *arguments_list;
 }
 
 %pure-parser
@@ -47,10 +61,9 @@ namespace nula {
 %token   FOR_TK          NEW_TK             CONTINUE_TK
 %token   GOTO_TK         NAMESPACE_TK         THIS_TK
 
-%token   BYTE_TK         SHORT_TK           INT_TK            LONG_TK
-%token   CHAR_TK         INTEGRAL_TK
+%token   INTEGRAL_TK
 
-%token   FLOAT_TK        DOUBLE_TK          FP_TK
+%token   FP_TK	OBJECT_TK STRING_TK
 
 %token   ID_TK
 
@@ -61,10 +74,58 @@ namespace nula {
 %token   STRING_LIT_TK   INT_LIT_TK         FP_LIT_TK
 %token   TRUE_TK         FALSE_TK           BOOL_LIT_TK       NULL_TK
 
+
+%type <type> type primitive_type reference_type INTEGRAL_TK FP_TK BOOLEAN_TK 
+			 array_type
+			 
+%type <identifier> class_or_interface_type name identifier qualified_name
+					class_type interface_type ID_TK super variable_declarator_id
+					simple_name
+					
+%type <strings> interface_type_list interfaces
+
+%type <literal> INT_LIT_TK FP_LIT_TK BOOL_LIT_TK STRING_LIT_TK NULL_TK
+%type <expression> literal
+
+%type <modifier> modifier modifiers PUBLIC_TK PRIVATE_TK FINAL_TK ABSTRACT_TK STATIC_TK PROTECTED_TK
+				 ASSIGN_ANY_TK ASSIGN_TK
+
+%type <meth_decl> constructor_declarator method_declarator 
+%type <decls> formal_parameter_list
+%type <decl> formal_parameter
+%type <statement> method_body block constructor_body
+
+%type <expression> variable_declarator variable_declarators expression array_initializer
+					method_header
+
+					
+
+%type <modifier> final assignment_operator
+%type <statement> constructor_block_end  block_statements block_begin block_end
+				  block_statement local_variable_declaration_statement local_variable_declaration
+				  statement statement_without_trailing_substatement
+				  labeled_statement if_then_statement if_then_else_statement while_statement
+				  for_statement labeled_statement_nsi if_then_else_statement_nsi while_statement_nsi
+				  for_statement_nsi statement_nsi try_statement throw_statement synchronized_statement
+				  return_statement continue_statement break_statement do_statement switch_statement
+				  expression_statement empty_statement  finally
+%type <expression> this_or_parent explicit_constructor_invocation variable_initializers
+					variable_initializer assignment pre_increment_expression constructor_header
+					pre_decrement_expression post_increment_expression post_decrement_expression
+					method_invocation class_instance_creation_expression statement_expression
+					primary_no_new_array array_creation_expression field_access array_access
+					type_literals  anonymous_class_creation dim_exprs dim_expr postfix_expression
+					unary_expression unary_expression_not_plus_minus cast_expression additive_expression
+					multiplicative_expression shift_expression relational_expression equality_expression
+					and_expression exclusive_or_expression inclusive_or_expression conditional_and_expression
+					conditional_or_expression  conditional_expression left_hand_side constant_expression
+					primary assignment_expression
+%type <argument_list> argument_list
+
+
 %%
 
 
-/* 19.3 Productions from 3: Lexical structure  */
 literal:
 	INT_LIT_TK { $$ = new(zone()) Literal(this, EXPR_INT_LITERAL, $1); }
 	| FP_LIT_TK { $$ = new(zone()) Literal(this, EXPR_FLOAT_LITERAL, $1); }
@@ -73,7 +134,6 @@ literal:
 	| NULL_TK { $$ = new(zone()) Literal(this, EXPR_NULL_LITERAL, 0); }
 ;
 
-/* 19.4 Productions from 4: Types, Values and Variables  */
 type:
 	primitive_type
 	| reference_type
@@ -83,11 +143,13 @@ primitive_type:
 	INTEGRAL_TK { $$ = INTEGER_TYPE; }
 	| FP_TK { $$ = FLOAT_TYPE; }
 	| BOOLEAN_TK { $$ = BOOLEAN_TYPE; }
+	| OBJECT_TK { $$ = OBJECT_TYPE; }
+	| STRING_TK { $$ = STRING_TYPE; }
 ;
 
 reference_type:
 	class_or_interface_type {
-		LoadType( $1 );
+		$$ = LoadType( $1 );
 	}
 	| array_type
 ;
@@ -199,6 +261,7 @@ modifiers:
 	}
 ;
 
+
 modifier:
 	PUBLIC_TK { $$ = ACC_PUBLIC; }
 	| PRIVATE_TK { $$ = ACC_PRIVATE; }
@@ -210,7 +273,7 @@ modifier:
 
 class_declaration:
 	modifiers CLASS_TK identifier super interfaces { 
-		CreateClass( modifier_, $2, $3, $4 );
+		CreateClass( $1, $3, $4, $5 );
 	} class_body
 	| CLASS_TK identifier super interfaces  {
 		CreateClass( ACC_PUBLIC, $2, $3, $4 );
@@ -226,7 +289,7 @@ super:
 
 interfaces:
 	| IMPLEMENTS_TK interface_type_list {
-		$$ =$2;
+		$$ = $2;
 	}
 ;
 
@@ -285,6 +348,7 @@ variable_declarators:
 	}
 ;
 
+
 variable_declarator:
 	variable_declarator_id {
 		$$ = new(zone()) Identifier(this, $1);
@@ -296,15 +360,13 @@ variable_declarator:
 
 variable_declarator_id:
 	identifier
-	| variable_declarator_id '[' ']' {
-	
-	}
 ;
 
 variable_initializer:
 	expression
 	| array_initializer
 ;
+
 
 /* 19.8.3 Productions from 8.4: Method Declarations  */
 method_declaration:
@@ -373,7 +435,7 @@ constructor_header:
 		$$ = new(zone()) MethodDeclaration(this, ACC_PUBLIC, VOID_TYPE, $1, NULL);
 	}
 	| modifiers constructor_declarator {
-		$$ = new(zone()) MethodDeclaration(this, ACC_PUBLIC, VOID_TYPE, $1, $3);
+		$$ = new(zone()) MethodDeclaration(this, $1, VOID_TYPE, $1, $2);
 	}
 ;
 
@@ -402,6 +464,7 @@ constructor_body:
 		$$ = $4; 
 	}
 ;
+
 
 constructor_block_end:
 	block_end
@@ -436,6 +499,7 @@ array_initializer:
 	}
 ;
 
+
 variable_initializers:
 	variable_initializer {
 	
@@ -446,7 +510,9 @@ variable_initializers:
 ;
 
 block:
-	'{' '}'
+	'{' '}' {
+		$$ = NULL;
+	}
 	| block_begin block_statements block_end {
 		$$ = $3;
 	}
@@ -468,6 +534,7 @@ block_statements:
 	| block_statements block_statement
 ;
 
+
 block_statement:
 	local_variable_declaration_statement
 	| statement {
@@ -476,7 +543,9 @@ block_statement:
 ;
 
 local_variable_declaration_statement:
-	local_variable_declaration ';'
+	local_variable_declaration ';' {
+		$$ = $1;
+	}
 ;
 
 final:
@@ -485,10 +554,10 @@ final:
 
 local_variable_declaration:
 	type variable_declarators {
-		DeclareVariable( 0, $1, $2 );
+		$$ = DeclareVariable( 0, $1, $2 );
 	}
 	| final type variable_declarators {
-		DeclareVariable( $1, $2, $3 );
+		$$ = DeclareVariable( $1, $2, $3 );
 	}
 ;
 
@@ -525,6 +594,7 @@ statement_without_trailing_substatement:
 	| throw_statement
 	| try_statement
 ;
+
 
 empty_statement:
 	';' {
@@ -714,6 +784,7 @@ for_update:
 	}
 ;
 
+
 statement_expression_list:
 	statement_expression {
 	
@@ -803,9 +874,10 @@ primary:
 	| array_creation_expression
 ;
 
+
 primary_no_new_array:
-	literal
-	| THIS_TK
+	literal { $$ = $1; }
+	| THIS_TK { $$ = new(zone()) Unary(this, EXPR_THIS); }
 	| '(' expression ')' { $$ = $2; }
 	| class_instance_creation_expression
 	| field_access
@@ -841,6 +913,7 @@ class_instance_creation_expression:
 	}
 	| anonymous_class_creation
 ;
+
 
 anonymous_class_creation:
 	NEW_TK class_type '(' argument_list ')' {
@@ -948,7 +1021,7 @@ array_access:
 
 postfix_expression:
 	primary
-	| name
+	| name { $$ = new(zone()) Identifier(this, $1); }
 	| post_increment_expression
 	| post_decrement_expression
 ;
@@ -976,6 +1049,10 @@ unary_expression:
 	}
 	| unary_expression_not_plus_minus
 ;
+
+
+
+
 
 pre_increment_expression:
 	INCR_TK unary_expression {
@@ -1013,6 +1090,7 @@ cast_expression:		/* Error handling here is potentially weak */
 	| '(' name dims ')' unary_expression_not_plus_minus { 
 	}
 ;
+
 
 multiplicative_expression:
 	unary_expression
@@ -1067,6 +1145,7 @@ relational_expression:
 
 ;
 
+
 equality_expression:
 	relational_expression
 	| equality_expression EQ_TK relational_expression {
@@ -1097,6 +1176,7 @@ inclusive_or_expression:
 	}
 ;
 
+
 conditional_and_expression:
 	inclusive_or_expression
 	| conditional_and_expression BOOL_AND_TK inclusive_or_expression {
@@ -1120,6 +1200,7 @@ assignment_expression:
 	| assignment
 ;
 
+
 assignment:
 	left_hand_side assignment_operator assignment_expression {
 	
@@ -1127,7 +1208,7 @@ assignment:
 ;
 
 left_hand_side:
-	name
+	name	{ $$ = new(zone()) Identifier(this, $1); }
 	| field_access
 	| array_access
 ;
@@ -1144,5 +1225,7 @@ expression:
 constant_expression:
 	expression
 ;
+
+
 
 %%
